@@ -1052,10 +1052,11 @@ class ExpenseApp(tk.Tk):
         ax.bar([i + width for i in x], savings, width=width, label="پس‌انداز", color=BLUE)
         ax.set_xticks(list(x))
         
+        # استفاده از نام کامل ماه‌ها به جای نام‌های کوتاه
         if HAS_MPL:
-            ax.set_xticklabels(JALALI_MONTH_SHORT, color=FG_TEXT, fontsize=9, fontproperties=font_prop)
+            ax.set_xticklabels(JALALI_MONTH_NAMES, color=FG_TEXT, fontsize=9, fontproperties=font_prop)
         else:
-            ax.set_xticklabels(JALALI_MONTH_SHORT, color=FG_TEXT, fontsize=9)
+            ax.set_xticklabels(JALALI_MONTH_NAMES, color=FG_TEXT, fontsize=9)
         
         ax.tick_params(colors=FG_TEXT)
         
