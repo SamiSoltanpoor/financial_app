@@ -11,12 +11,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
 try:
-    from openai import OpenAI
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
-
-try:
     import jdatetime
     HAS_JDATETIME = True
 except ImportError:
@@ -94,23 +88,6 @@ BLUE = "#4d96ff"
 YELLOW = "#ffd166"
 FONT_FAMILY = "Segoe UI" if sys.platform.startswith("win") else "Arial"
 
-GAPGPT_API_KEY = "sk-lUxfwnEwgc9qGakxMOgX11NwJ9i7ODUYXgd8wkDogxIrB7bw"
-GAPGPT_BASE_URL = "https://api.gapgpt.app/v1"
-GAPGPT_MODEL = "gapgpt-qwen-3.6"
-
-FINANCIAL_SYSTEM_PROMPT = (
-    "تو یک مشاور تخصصی مدیریت مالی، بودجه‌بندی و پس‌انداز هستی. "
-    "وظیفه تو فقط و فقط پاسخ به سوالات مالی، ارائه راهکارهای پس‌انداز، تحلیل خرج و مخارج و مشاوره اقتصادی است. "
-    "اگر کلیه اعداد درآمد، هزینه و پس‌انداز صفر یا نزدیک به صفر بودند، به هیچ وجه فرض نکن که کاربر بیکار است یا پس‌اندازی ندارد؛ "
-    "بلکه خیلی کوتاه و صمیمی بگو که داده مالی کافی برای این بازه زمانی ثبت نشده است و او را به ثبت تراکنش‌ها دعوت کن. "
-    "اگر کاربر سوالی غیرمرتبط با مسائل مالی، اقتصادی، یا مدیریت خرج و مخارج پرسید (مثل عمومی، برنامه‌نویسی، شعر، پزشکی و غیره)، "
-    "با نهایت احترام بگو که شما فقط مشاور مالی هستید و اجازه صحبت درباره موضوعات دیگر را ندارید. "
-    "قوانین بسیار مهم در نگارش پاسخ:\n"
-    "۱. از هیچ کلمه یا واژه انگلیسی استفاده نکن و تمام کلمات را به فارسی بنویس.\n"
-    "۲. از هیچ علامت مارک‌داون یا علامت‌های پررنگ‌کننده مانند ستاره، هشتگ، خط تیره، یا بولد استفاده نکن.\n"
-    "۳. متن را بسیار تمیز، روان، زیبا و در قالب پاراگراف‌های ساده فارسی بنویس."
-)
-
 JALALI_MONTH_NAMES = [
     "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
     "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
@@ -162,14 +139,6 @@ def fmt_money(v):
         return f"{v:,.0f}"
     except Exception:
         return str(v)
-
-def clean_ai_formatting(text):
-    if not text:
-        return ""
-    bad_chars = ["*", "#", "_", "`", "~", ">"]
-    for char in bad_chars:
-        text = text.replace(char, "")
-    return text.strip()
 
 def rtl(text):
     if not text:
@@ -516,7 +485,7 @@ class ExpenseApp(tk.Tk):
                 if val < 30:
                     status_lbl.config(text=f"{spin}  در حال بارگذاری پایگاه داده...")
                 elif val < 70:
-                    status_lbl.config(text=f"{spin}  در حال متصل شدن به مشاور هوش مصنوعی...")
+                    status_lbl.config(text=f"{spin}  در حال اتصال به ماژول‌های برنامه...")
                 else:
                     status_lbl.config(text=f"{spin}  در حال آماده‌سازی محیط کاربری...")
 
@@ -550,11 +519,6 @@ class ExpenseApp(tk.Tk):
         self.sel_month = tk.IntVar(value=today.month)
         self.budget_rows = {}
         self.edit_dialog = None
-
-        if HAS_OPENAI:
-            self.ai_client = OpenAI(api_key=GAPGPT_API_KEY, base_url=GAPGPT_BASE_URL)
-        else:
-            self.ai_client = None
 
         self._setup_style()
         self._build_layout()
@@ -606,7 +570,7 @@ class ExpenseApp(tk.Tk):
 
         tk.Label(header, text="💰 مدیریت خرج و مخارج", bg=BG_MAIN, fg=FG_TEXT,
                   font=(FONT_FAMILY, 20, "bold")).pack(side="right")
-        tk.Label(header, text="درآمد، هزینه، بودجه و مشاور هوشمند",
+        tk.Label(header, text="درآمد، هزینه و بودجه‌بندی هوشمند",
                   bg=BG_MAIN, fg=FG_MUTED, font=(FONT_FAMILY, 11)).pack(side="right", padx=12)
 
         nb = ttk.Notebook(self)
@@ -618,7 +582,6 @@ class ExpenseApp(tk.Tk):
         self.tab_history = ttk.Frame(nb)
         self.tab_budget = ttk.Frame(nb)
         self.tab_report = ttk.Frame(nb)
-        self.tab_ai = ttk.Frame(nb)
         self.tab_settings = ttk.Frame(nb)
 
         nb.add(self.tab_dashboard, text="📊 داشبورد")
@@ -626,7 +589,6 @@ class ExpenseApp(tk.Tk):
         nb.add(self.tab_history, text="📜 تاریخچه")
         nb.add(self.tab_budget, text="🎯 بودجه‌بندی")
         nb.add(self.tab_report, text="📈 گزارش")
-        nb.add(self.tab_ai, text="🤖 مشاور هوش مصنوعی")
         nb.add(self.tab_settings, text="⚙️ پشتیبان‌گیری")
 
         nb.bind("<<NotebookTabChanged>>", self.on_tab_change)
@@ -636,7 +598,6 @@ class ExpenseApp(tk.Tk):
         self._build_history(self.tab_history)
         self._build_budget(self.tab_budget)
         self._build_report(self.tab_report)
-        self._build_ai_chat(self.tab_ai)
         self._build_settings(self.tab_settings)
 
     def show_tab_loader(self):
@@ -662,7 +623,7 @@ class ExpenseApp(tk.Tk):
                 self.refresh_budget()
             elif selected_tab == 4:
                 self.refresh_report()
-            elif selected_tab == 6:
+            elif selected_tab == 5:
                 self.refresh_settings()
             
             self.after(10, self.hide_tab_loader)
@@ -1126,8 +1087,6 @@ class ExpenseApp(tk.Tk):
         self.report_year_cb = ttk.Combobox(top, state="readonly", width=8, font=(FONT_FAMILY, 10), justify="right")
         self.report_year_cb.pack(side="right")
         ModernButton(top, text="بروزرسانی نمودار", command=self.refresh_report).pack(side="right", padx=10)
-        ModernButton(top, text="🤖 تحلیل هوشمند مشاور", bg_color=ACCENT, hover_color=ACCENT_HOVER,
-                     command=self._analyze_report_with_ai).pack(side="right", padx=4)
         
         ModernButton(top, text="📥 خروجی اکسل", bg_color=GREEN, hover_color="#33c084", fg_color="#08120c",
                      command=self._export_report_excel).pack(side="left", padx=4)
@@ -1136,15 +1095,6 @@ class ExpenseApp(tk.Tk):
 
         self.report_chart_holder = tk.Frame(parent, bg=BG_CARD)
         self.report_chart_holder.pack(fill="both", expand=True, pady=10)
-
-        ai_box = tk.Frame(parent, bg=BG_CARD_ALT)
-        ai_box.pack(fill="x", pady=(0, 10))
-        tk.Label(ai_box, text="💡 نظر مشاور هوش مصنوعی:", bg=BG_CARD_ALT, fg=ACCENT2,
-                 font=(FONT_FAMILY, 10, "bold")).pack(anchor="e", padx=12, pady=(8, 2))
-        
-        self.ai_report_lbl = tk.Label(ai_box, text="روی دکمه تحلیل هوشمند مشاور کلیک کنید تا تحلیل وضعیت مالی شما آماده شود.",
-                                      bg=BG_CARD_ALT, fg=FG_TEXT, font=(FONT_FAMILY, 9), wraplength=1050, justify="right", anchor="e")
-        self.ai_report_lbl.pack(fill="x", padx=12, pady=(0, 8))
 
     def _compute_year_data(self, year):
         incomes, expenses, savings = [], [], []
@@ -1231,125 +1181,6 @@ class ExpenseApp(tk.Tk):
                 self.after(25, lambda: animate_bars(step + 1, max_steps))
 
         animate_bars()
-
-    def _analyze_report_with_ai(self):
-        if not HAS_OPENAI or not self.ai_client:
-            messagebox.showerror("خطا", "سرویس هوش مصنوعی در دسترس نیست.")
-            return
-
-        try:
-            year = int(self.report_year_cb.get())
-        except ValueError:
-            year = jtoday().year
-
-        incomes, expenses, savings = self._compute_year_data(year)
-        total_inc, total_exp = sum(incomes), sum(expenses)
-
-        if total_inc == 0 and total_exp == 0:
-            self.ai_report_lbl.config(
-                text=f"اطلاعات مالی برای سال {year} ثبت نشده است. لطفاً ابتدا تراکنش‌های خود را در بخش ثبت تراکنش وارد کنید."
-            )
-            return
-
-        month_details = [
-            f"{JALALI_MONTH_NAMES[i]}: درآمد={incomes[i]}, هزینه={expenses[i]}, پس‌انداز={savings[i]}"
-            for i in range(12)
-        ]
-
-        summary_text = "\n".join(month_details)
-        prompt = (
-            f"اطلاعات مالی سال {year} کاربر به شرح زیر است:\n{summary_text}\n"
-            "لطفا وضعیت مالی او را به زبان فارسی بسیار صمیمی و کاربردی تحلیل کن. "
-            "مشخص کن در چه ماه‌هایی کم پس‌انداز کرده یا هزینه‌اش بالا بوده و یک راهکار کوتاه برای بهبود پس‌اندازش ارائه بده. "
-            "اصلا از ستاره یا علامت های پررنگ کننده استفاده نکن."
-        )
-
-        self.ai_report_lbl.config(text="⏳ در حال تحلیل داده‌های مالی توسط هوش مصنوعی...")
-
-        def fetch_ai():
-            try:
-                response = self.ai_client.chat.completions.create(
-                    model=GAPGPT_MODEL,
-                    messages=[
-                        {"role": "system", "content": FINANCIAL_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                text = clean_ai_formatting(response.choices[0].message.content)
-                self.after(0, lambda: self.ai_report_lbl.config(text=text))
-            except Exception as e:
-                self.after(0, lambda: self.ai_report_lbl.config(text=f"خطا در ارتباط با هوش مصنوعی: {e}"))
-
-        threading.Thread(target=fetch_ai, daemon=True).start()
-
-    def _build_ai_chat(self, parent):
-        top = tk.Frame(parent, bg=BG_MAIN)
-        top.pack(fill="x", pady=(10, 5))
-        tk.Label(top, text="🤖 مشاور اختصاصی مالی و بودجه‌بندی", bg=BG_MAIN, fg=FG_TEXT,
-                 font=(FONT_FAMILY, 12, "bold")).pack(side="right")
-
-        chat_card = tk.Frame(parent, bg=BG_CARD)
-        chat_card.pack(fill="both", expand=True, pady=5)
-
-        self.chat_display = tk.Text(chat_card, bg=BG_CARD_ALT, fg=FG_TEXT, font=(FONT_FAMILY, 10),
-                                    wrap="word", bd=0, padx=12, pady=10)
-        self.chat_display.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        self.chat_display.tag_configure("rtl_right", justify="right")
-        self.chat_display.config(state="disabled")
-
-        input_frame = tk.Frame(parent, bg=BG_MAIN)
-        input_frame.pack(fill="x", pady=(5, 10))
-
-        self.chat_input = ttk.Entry(input_frame, font=(FONT_FAMILY, 10), justify="right")
-        self.chat_input.pack(side="right", fill="x", expand=True, padx=(5, 0))
-        self.chat_input.bind("<Return>", lambda e: self._send_ai_chat())
-
-        ModernButton(input_frame, text="ارسال 🚀", command=self._send_ai_chat).pack(side="left")
-
-        self.chat_history_messages = [
-            {"role": "system", "content": FINANCIAL_SYSTEM_PROMPT}
-        ]
-        
-        self._append_chat("مشاور", "سلام! من مشاور مالی شما هستم. چطور می‌تونم در زمینه مدیریت هزینه‌ها، بودجه‌بندی و پس‌انداز بهتون کمک کنم؟")
-
-    def _append_chat(self, sender, text):
-        clean_text = clean_ai_formatting(text)
-        self.chat_display.config(state="normal")
-        
-        self.chat_display.insert("end", f"{sender}:\n", ("rtl_right",))
-        self.chat_display.insert("end", f"{clean_text}\n\n", ("rtl_right",))
-        
-        self.chat_display.see("end")
-        self.chat_display.config(state="disabled")
-
-    def _send_ai_chat(self):
-        user_msg = self.chat_input.get().strip()
-        if not user_msg:
-            return
-
-        if not HAS_OPENAI or not self.ai_client:
-            messagebox.showerror("خطا", "سرویس هوش مصنوعی در دسترس نیست.")
-            return
-
-        self._append_chat("شما", user_msg)
-        self.chat_input.delete(0, "end")
-
-        self.chat_history_messages.append({"role": "user", "content": user_msg})
-
-        def chat_thread():
-            try:
-                response = self.ai_client.chat.completions.create(
-                    model=GAPGPT_MODEL,
-                    messages=self.chat_history_messages
-                )
-                ai_msg = clean_ai_formatting(response.choices[0].message.content)
-                self.chat_history_messages.append({"role": "assistant", "content": ai_msg})
-                self.after(0, lambda: self._append_chat("مشاور", ai_msg))
-            except Exception as e:
-                self.after(0, lambda: self._append_chat("مشاور", f"خطا در دریافت پاسخ: {e}"))
-
-        threading.Thread(target=chat_thread, daemon=True).start()
 
     def _export_transactions_excel(self, rows, default_name):
         if not HAS_OPENPYXL:
