@@ -3,11 +3,18 @@ import os
 import sys
 import shutil
 import glob
+import threading
 from io import BytesIO
 from collections import defaultdict
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+
+try:
+    from openai import OpenAI
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
 
 try:
     import jdatetime
@@ -23,43 +30,20 @@ try:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     import matplotlib.font_manager as fm
     
-    # تنظیم فونت فارسی برای matplotlib
     def setup_persian_font_for_matplotlib():
-        """تنظیم فونت فارسی برای matplotlib"""
-        # لیست فونت‌های فارسی که هم فارسی و هم لاتین را پشتیبانی می‌کنند
-        # Vazirmatn و IRANSans بهترین گزینه‌ها هستند
-        persian_fonts = [
-            'Vazirmatn', 'IRANSans', 'Vazir', 'Shabnam', 'Sahel',
-            'B Nazanin', 'B Mitra', 'B Yekan', 'Tahoma', 'Arial'
-        ]
-        
-        # پیدا کردن فونت‌های نصب شده
-        available_fonts = [f.name for f in fm.fontManager.ttflist]
-        
-        # اولویت با Vazirmatn است چون هم فارسی و هم لاتین را خوب پشتیبانی می‌کند
         preferred_fonts = ['Vazirmatn', 'IRANSans', 'Vazir', 'Shabnam', 'Sahel']
-        
+        available_fonts = [f.name for f in fm.fontManager.ttflist]
+        chosen = 'DejaVu Sans'
         for font in preferred_fonts:
             if font in available_fonts:
-                return font
-        
-        # اگر هیچ فونت فارسی پیدا نشد، از فونت پیش‌فرض استفاده کن
-        return 'DejaVu Sans'
+                chosen = font
+                break
+        return chosen
     
     PERSIAN_FONT = setup_persian_font_for_matplotlib()
-    
-    # تنظیم فونت برای matplotlib
-    matplotlib.rcParams['font.family'] = PERSIAN_FONT
+    matplotlib.rcParams['font.family'] = [PERSIAN_FONT, 'DejaVu Sans', 'Arial', 'sans-serif']
     matplotlib.rcParams['axes.unicode_minus'] = False
     matplotlib.rcParams['font.size'] = 10
-    
-    # برای اطمینان از اینکه فونت به درستی تنظیم شده
-    if PERSIAN_FONT != 'DejaVu Sans':
-        # پیدا کردن مسیر فونت و تنظیم آن
-        for f in fm.fontManager.ttflist:
-            if f.name == PERSIAN_FONT:
-                matplotlib.rcParams['font.family'] = [PERSIAN_FONT, 'DejaVu Sans', 'sans-serif']
-                break
     
     HAS_MPL = True
 except ImportError:
@@ -102,6 +86,7 @@ BG_CARD_ALT = "#20264a"
 FG_TEXT = "#e8e9f3"
 FG_MUTED = "#9096b5"
 ACCENT = "#7c5cff"
+ACCENT_HOVER = "#6a4bee"
 ACCENT2 = "#4fd1c5"
 GREEN = "#3ddc97"
 RED = "#ff6b6b"
@@ -109,13 +94,26 @@ BLUE = "#4d96ff"
 YELLOW = "#ffd166"
 FONT_FAMILY = "Segoe UI" if sys.platform.startswith("win") else "Arial"
 
+GAPGPT_API_KEY = "sk-lUxfwnEwgc9qGakxMOgX11NwJ9i7ODUYXgd8wkDogxIrB7bw"
+GAPGPT_BASE_URL = "https://api.gapgpt.app/v1"
+GAPGPT_MODEL = "gapgpt-qwen-3.6"
+
+FINANCIAL_SYSTEM_PROMPT = (
+    "تو یک مشاور تخصصی مدیریت مالی، بودجه‌بندی و پس‌انداز هستی. "
+    "وظیفه تو فقط و فقط پاسخ به سوالات مالی، ارائه راهکارهای پس‌انداز، تحلیل خرج و مخارج و مشاوره اقتصادی است. "
+    "اگر کلیه اعداد درآمد، هزینه و پس‌انداز صفر یا نزدیک به صفر بودند، به هیچ وجه فرض نکن که کاربر بیکار است یا پس‌اندازی ندارد؛ "
+    "بلکه خیلی کوتاه و صمیمی بگو که داده مالی کافی برای این بازه زمانی ثبت نشده است و او را به ثبت تراکنش‌ها دعوت کن. "
+    "اگر کاربر سوالی غیرمرتبط با مسائل مالی، اقتصادی، یا مدیریت خرج و مخارج پرسید (مثل عمومی، برنامه‌نویسی، شعر، پزشکی و غیره)، "
+    "با نهایت احترام بگو که شما فقط مشاور مالی هستید و اجازه صحبت درباره موضوعات دیگر را ندارید. "
+    "قوانین بسیار مهم در نگارش پاسخ:\n"
+    "۱. از هیچ کلمه یا واژه انگلیسی استفاده نکن و تمام کلمات را به فارسی بنویس.\n"
+    "۲. از هیچ علامت مارک‌داون یا علامت‌های پررنگ‌کننده مانند ستاره، هشتگ، خط تیره، یا بولد استفاده نکن.\n"
+    "۳. متن را بسیار تمیز، روان، زیبا و در قالب پاراگراف‌های ساده فارسی بنویس."
+)
+
 JALALI_MONTH_NAMES = [
     "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
     "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
-]
-JALALI_MONTH_SHORT = [
-    "فرو", "ارد", "خرد", "تیر", "مرد", "شهر",
-    "مهر", "آبا", "آذر", "دی", "بهم", "اسف",
 ]
 
 EXPENSE_CATEGORIES = [
@@ -137,14 +135,12 @@ def jtoday():
         year, month, day = 1403, 1, 1
     return _Fallback()
 
-
 def jnow_str():
     if HAS_JDATETIME:
         n = jdatetime.datetime.now()
         return f"{n.year:04d}{n.month:02d}{n.day:02d}-{n.hour:02d}{n.minute:02d}{n.second:02d}"
     import time
     return time.strftime("%Y%m%d-%H%M%S")
-
 
 def parse_jalali(text):
     if not HAS_JDATETIME:
@@ -155,14 +151,11 @@ def parse_jalali(text):
     y, m, d = (int(p) for p in parts)
     return jdatetime.date(y, m, d)
 
-
 def jalali_str(jdate):
     return f"{jdate.year:04d}-{jdate.month:02d}-{jdate.day:02d}"
 
-
 def month_label(year, month):
     return f"{JALALI_MONTH_NAMES[month-1]} {year}"
-
 
 def fmt_money(v):
     try:
@@ -170,9 +163,15 @@ def fmt_money(v):
     except Exception:
         return str(v)
 
+def clean_ai_formatting(text):
+    if not text:
+        return ""
+    bad_chars = ["*", "#", "_", "`", "~", ">"]
+    for char in bad_chars:
+        text = text.replace(char, "")
+    return text.strip()
 
 def rtl(text):
-    """برای رندر درست فارسی در matplotlib/reportlab: shaping + راست‌به‌چپ."""
     if not text:
         return text
     if HAS_RESHAPE:
@@ -184,9 +183,7 @@ def rtl(text):
 
 _PERSIAN_FONT_NAME = None
 
-
 def find_persian_font():
-    """به‌دنبال یک فونت TTF فارسی می‌گردد: اول کنار اسکریپت، بعد مسیرهای رایج سیستم."""
     candidates = []
     candidates += glob.glob(os.path.join(SCRIPT_DIR, "*.ttf"))
     candidates += glob.glob(os.path.join(SCRIPT_DIR, "fonts", "*.ttf"))
@@ -210,7 +207,6 @@ def find_persian_font():
         if path and os.path.isfile(path):
             return path
     return None
-
 
 def register_persian_font():
     global _PERSIAN_FONT_NAME
@@ -238,7 +234,6 @@ def prune_backups(keep=MAX_BACKUPS):
         except OSError:
             pass
 
-
 def backup_now():
     if not os.path.isfile(DB_PATH):
         return None
@@ -248,15 +243,12 @@ def backup_now():
     prune_backups()
     return dest
 
-
 def auto_backup_if_needed():
-    """اگر امروز پشتیبانی گرفته نشده، یکی می‌گیرد."""
     os.makedirs(BACKUP_DIR, exist_ok=True)
     today_prefix = jnow_str().split("-")[0]
     existing = glob.glob(os.path.join(BACKUP_DIR, f"expenses_{today_prefix}-*.db"))
     if not existing:
         backup_now()
-
 
 def list_backups():
     files = sorted(glob.glob(os.path.join(BACKUP_DIR, "expenses_*.db")), reverse=True)
@@ -272,7 +264,7 @@ class Database:
         self._connect()
 
     def _connect(self):
-        self.conn = sqlite3.connect(self.path)
+        self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -354,7 +346,6 @@ class Database:
             years.append(ty)
         return sorted(set(years))
 
-    # --- بودجه ---
     def get_budgets(self):
         cur = self.conn.execute("SELECT category, amount FROM budgets")
         return {r[0]: r[1] for r in cur.fetchall()}
@@ -367,29 +358,63 @@ class Database:
         )
         self.conn.commit()
 
+class ModernButton(tk.Button):
+    def __init__(self, master, bg_color=ACCENT, hover_color=ACCENT_HOVER, fg_color="#ffffff", **kw):
+        super().__init__(
+            master, bg=bg_color, activebackground=hover_color, fg=fg_color,
+            activeforeground=fg_color, bd=0, relief="flat", cursor="hand2",
+            font=(FONT_FAMILY, 10, "bold"), padx=14, pady=6, **kw
+        )
+        self.bg_color = bg_color
+        self.hover_color = hover_color
+        self.bind("<Enter>", lambda e: self.config(bg=self.hover_color))
+        self.bind("<Leave>", lambda e: self.config(bg=self.bg_color))
+
 class StatCard(tk.Frame):
     def __init__(self, master, title, color, **kw):
         super().__init__(master, bg=BG_CARD, highlightbackground=color,
                           highlightthickness=1, bd=0, **kw)
         self.title = title
         self.color = color
+        self._current_num = 0.0
+        self._anim_job = None
+
         tk.Label(self, text=title, bg=BG_CARD, fg=FG_MUTED,
-                  font=(FONT_FAMILY, 11)).pack(anchor="w", padx=16, pady=(14, 0))
+                  font=(FONT_FAMILY, 11)).pack(anchor="e", padx=16, pady=(14, 0))
         self.value_lbl = tk.Label(self, text="0", bg=BG_CARD, fg=color,
                                    font=(FONT_FAMILY, 22, "bold"))
-        self.value_lbl.pack(anchor="w", padx=16, pady=(2, 14))
+        self.value_lbl.pack(anchor="e", padx=16, pady=(2, 14))
 
-    def set_value(self, text):
-        self.value_lbl.config(text=text)
+    def set_value(self, target_value):
+        try:
+            target_num = float(str(target_value).replace(",", ""))
+        except ValueError:
+            self.value_lbl.config(text=str(target_value))
+            return
 
+        if self._anim_job:
+            self.after_cancel(self._anim_job)
+
+        def animate_step(curr, target):
+            diff = target - curr
+            if abs(diff) < 1:
+                self._current_num = target
+                self.value_lbl.config(text=fmt_money(target))
+                self._anim_job = None
+            else:
+                next_val = curr + diff * 0.2
+                self._current_num = next_val
+                self.value_lbl.config(text=fmt_money(next_val))
+                self._anim_job = self.after(20, lambda: animate_step(next_val, target))
+
+        animate_step(self._current_num, target_num)
 
 class BudgetRow(tk.Frame):
-    """یک ردیف بودجه برای یک دسته‌بندی هزینه."""
-
     def __init__(self, master, category, on_change, **kw):
         super().__init__(master, bg=BG_CARD, **kw)
         self.category = category
         self.amount_var = tk.StringVar(value="0")
+        self._anim_job = None
 
         tk.Label(self, text=category, bg=BG_CARD, fg=FG_TEXT, width=18, anchor="e",
                   font=(FONT_FAMILY, 10, "bold")).grid(row=0, column=4, sticky="e", padx=8, pady=8)
@@ -402,8 +427,8 @@ class BudgetRow(tk.Frame):
         self.progress.grid(row=0, column=2, padx=8)
 
         self.status_lbl = tk.Label(self, text="", bg=BG_CARD, fg=FG_MUTED,
-                                    font=(FONT_FAMILY, 9), width=28, anchor="w")
-        self.status_lbl.grid(row=0, column=1, sticky="w", padx=8)
+                                    font=(FONT_FAMILY, 9), width=28, anchor="e")
+        self.status_lbl.grid(row=0, column=1, sticky="e", padx=8)
 
         self.columnconfigure(0, weight=1)
 
@@ -417,26 +442,103 @@ class BudgetRow(tk.Frame):
         except ValueError:
             return 0.0
 
+    def animate_progress(self, current, target):
+        diff = target - current
+        if abs(diff) < 0.5:
+            self.progress["value"] = target
+            self._anim_job = None
+        else:
+            next_val = current + diff * 0.25
+            self.progress["value"] = next_val
+            self._anim_job = self.after(15, lambda: self.animate_progress(next_val, target))
+
     def set_spent(self, spent, budget):
+        if self._anim_job:
+            self.after_cancel(self._anim_job)
+
         if budget > 0:
             pct = (spent / budget) * 100
-            self.progress["value"] = min(pct, 100)
+            target_val = min(pct, 100)
+            self.animate_progress(self.progress["value"], target_val)
+
             color = GREEN if pct < 80 else (YELLOW if pct < 100 else RED)
             self.status_lbl.config(
-                text=f"{fmt_money(spent)} / {fmt_money(budget)}  ({pct:.0f}%)", fg=color)
+                text=f"{fmt_money(spent)} / {fmt_money(budget)}  ({pct:.0f}٪)", fg=color)
         else:
-            self.progress["value"] = 0
+            self.animate_progress(self.progress["value"], 0)
             self.status_lbl.config(text=f"{fmt_money(spent)} (بدون بودجه)", fg=FG_MUTED)
 
 class ExpenseApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        auto_backup_if_needed()
-        self.db = Database()
+        self.withdraw()
         self.title("مدیریت خرج و مخارج")
         self.geometry("1150x720")
         self.minsize(940, 620)
         self.configure(bg=BG_MAIN)
+
+        self._show_splash_screen()
+
+    def _show_splash_screen(self):
+        splash = tk.Toplevel(self)
+        splash.overrideredirect(True)
+        splash.configure(bg=BG_MAIN)
+        
+        w, h = 500, 340
+        ws = splash.winfo_screenwidth()
+        hs = splash.winfo_screenheight()
+        x = (ws / 2) - (w / 2)
+        y = (hs / 2) - (h / 2)
+        splash.geometry(f'{w}x{h}+{int(x)}+{int(y)}')
+
+        card = tk.Frame(splash, bg=BG_CARD, highlightbackground=ACCENT, highlightthickness=2)
+        card.pack(fill="both", expand=True, padx=10, pady=10)
+
+        tk.Label(card, text="💎", bg=BG_CARD, font=(FONT_FAMILY, 48)).pack(pady=(20, 0))
+        tk.Label(card, text="مدیریت هوشمند خرج و مخارج", bg=BG_CARD, fg=FG_TEXT, font=(FONT_FAMILY, 18, "bold")).pack(pady=(5, 2))
+        tk.Label(card, text="دستیار مالی و بودجه‌بندی شخص شما", bg=BG_CARD, fg=ACCENT2, font=(FONT_FAMILY, 10, "bold")).pack(pady=(0, 15))
+
+        self.spinner_symbols = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self.spinner_idx = 0
+
+        status_lbl = tk.Label(card, text="در حال آماده‌سازی...", bg=BG_CARD, fg=FG_MUTED, font=(FONT_FAMILY, 9))
+        status_lbl.pack(pady=(0, 8))
+
+        progress = ttk.Progressbar(card, length=360, mode="determinate")
+        progress.pack(pady=5)
+
+        def animate_splash(val=0):
+            if val <= 100:
+                progress["value"] = val
+                spin = self.spinner_symbols[self.spinner_idx % len(self.spinner_symbols)]
+                self.spinner_idx += 1
+
+                if val < 30:
+                    status_lbl.config(text=f"{spin}  در حال بارگذاری پایگاه داده...")
+                elif val < 70:
+                    status_lbl.config(text=f"{spin}  در حال متصل شدن به مشاور هوش مصنوعی...")
+                else:
+                    status_lbl.config(text=f"{spin}  در حال آماده‌سازی محیط کاربری...")
+
+                self.after(30, lambda: animate_splash(val + 2))
+            else:
+                self._fade_out_splash(splash)
+
+        animate_splash()
+
+    def _fade_out_splash(self, splash, alpha=1.0):
+        if alpha > 0.0:
+            alpha -= 0.1
+            splash.attributes("-alpha", max(0.0, alpha))
+            self.after(20, lambda: self._fade_out_splash(splash, alpha))
+        else:
+            splash.destroy()
+            self.deiconify()
+            self._initialize_app()
+
+    def _initialize_app(self):
+        auto_backup_if_needed()
+        self.db = Database()
 
         if not HAS_JDATETIME:
             messagebox.showwarning(
@@ -449,9 +551,14 @@ class ExpenseApp(tk.Tk):
         self.budget_rows = {}
         self.edit_dialog = None
 
+        if HAS_OPENAI:
+            self.ai_client = OpenAI(api_key=GAPGPT_API_KEY, base_url=GAPGPT_BASE_URL)
+        else:
+            self.ai_client = None
+
         self._setup_style()
         self._build_layout()
-        self.refresh_all()
+        self.on_tab_change(None)
 
     def _setup_style(self):
         style = ttk.Style(self)
@@ -459,7 +566,7 @@ class ExpenseApp(tk.Tk):
 
         style.configure("TNotebook", background=BG_MAIN, borderwidth=0)
         style.configure("TNotebook.Tab", background=BG_CARD, foreground=FG_MUTED,
-                         padding=(16, 9), font=(FONT_FAMILY, 10, "bold"))
+                         padding=(14, 9), font=(FONT_FAMILY, 10, "bold"))
         style.map("TNotebook.Tab",
                   background=[("selected", ACCENT)],
                   foreground=[("selected", "#ffffff")])
@@ -470,18 +577,10 @@ class ExpenseApp(tk.Tk):
         style.configure("Muted.TLabel", background=BG_MAIN, foreground=FG_MUTED)
         style.configure("Card.TLabel", background=BG_CARD, foreground=FG_TEXT)
 
-        style.configure("TButton", background=ACCENT, foreground="#ffffff",
-                         font=(FONT_FAMILY, 10, "bold"), padding=(13, 7), borderwidth=0)
-        style.map("TButton", background=[("active", "#6a4bee")])
-        style.configure("Danger.TButton", background=RED, foreground="#ffffff")
-        style.map("Danger.TButton", background=[("active", "#e05555")])
-        style.configure("Success.TButton", background=GREEN, foreground="#08120c")
-        style.map("Success.TButton", background=[("active", "#33c084")])
-
         style.configure("TCombobox", fieldbackground=BG_CARD_ALT, background=BG_CARD_ALT,
-                         foreground=FG_TEXT, arrowcolor=FG_TEXT)
+                         foreground=FG_TEXT, arrowcolor=FG_TEXT, justify="right")
         style.configure("TEntry", fieldbackground=BG_CARD_ALT, foreground=FG_TEXT,
-                         insertcolor=FG_TEXT)
+                         insertcolor=FG_TEXT, justify="right")
         style.configure("TRadiobutton", background=BG_MAIN, foreground=FG_TEXT,
                          font=(FONT_FAMILY, 10))
         style.map("TRadiobutton", background=[("active", BG_MAIN)])
@@ -493,15 +592,21 @@ class ExpenseApp(tk.Tk):
                          font=(FONT_FAMILY, 10, "bold"), relief="flat")
         style.map("Treeview", background=[("selected", ACCENT)])
 
-        style.configure("TProgressbar", troughcolor=BG_CARD_ALT, background=ACCENT2,
-                         thickness=14)
+        style.configure("TProgressbar", troughcolor=BG_CARD_ALT, background=ACCENT2, thickness=12)
 
     def _build_layout(self):
         header = tk.Frame(self, bg=BG_MAIN)
-        header.pack(fill="x", padx=24, pady=(20, 10))
+        header.pack(fill="x", padx=24, pady=(15, 5))
+        
+        self.tab_loader_frame = tk.Frame(header, bg=BG_MAIN)
+        self.tab_loader_frame.pack(side="left")
+        
+        self.tab_loading_lbl = tk.Label(self.tab_loader_frame, text="⏳ در حال به روزرسانی...", bg=BG_MAIN, fg=ACCENT2, font=(FONT_FAMILY, 9, "bold"))
+        self.tab_loading_pbar = ttk.Progressbar(self.tab_loader_frame, length=120, mode="indeterminate")
+
         tk.Label(header, text="💰 مدیریت خرج و مخارج", bg=BG_MAIN, fg=FG_TEXT,
                   font=(FONT_FAMILY, 20, "bold")).pack(side="right")
-        tk.Label(header, text="درآمد، هزینه، بودجه و گزارش — تقویم شمسی",
+        tk.Label(header, text="درآمد، هزینه، بودجه و مشاور هوشمند",
                   bg=BG_MAIN, fg=FG_MUTED, font=(FONT_FAMILY, 11)).pack(side="right", padx=12)
 
         nb = ttk.Notebook(self)
@@ -513,6 +618,7 @@ class ExpenseApp(tk.Tk):
         self.tab_history = ttk.Frame(nb)
         self.tab_budget = ttk.Frame(nb)
         self.tab_report = ttk.Frame(nb)
+        self.tab_ai = ttk.Frame(nb)
         self.tab_settings = ttk.Frame(nb)
 
         nb.add(self.tab_dashboard, text="📊 داشبورد")
@@ -520,16 +626,48 @@ class ExpenseApp(tk.Tk):
         nb.add(self.tab_history, text="📜 تاریخچه")
         nb.add(self.tab_budget, text="🎯 بودجه‌بندی")
         nb.add(self.tab_report, text="📈 گزارش")
+        nb.add(self.tab_ai, text="🤖 مشاور هوش مصنوعی")
         nb.add(self.tab_settings, text="⚙️ پشتیبان‌گیری")
 
-        nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_all())
+        nb.bind("<<NotebookTabChanged>>", self.on_tab_change)
 
         self._build_dashboard(self.tab_dashboard)
         self._build_add_form(self.tab_add)
         self._build_history(self.tab_history)
         self._build_budget(self.tab_budget)
         self._build_report(self.tab_report)
+        self._build_ai_chat(self.tab_ai)
         self._build_settings(self.tab_settings)
+
+    def show_tab_loader(self):
+        self.tab_loading_lbl.pack(side="left", padx=5)
+        self.tab_loading_pbar.pack(side="left")
+        self.tab_loading_pbar.start(10)
+
+    def hide_tab_loader(self):
+        self.tab_loading_pbar.stop()
+        self.tab_loading_pbar.pack_forget()
+        self.tab_loading_lbl.pack_forget()
+
+    def on_tab_change(self, event):
+        selected_tab = self.nb.index(self.nb.select())
+        self.show_tab_loader()
+        
+        def process_refresh():
+            if selected_tab == 0:
+                self.refresh_dashboard()
+            elif selected_tab == 2:
+                self.refresh_history()
+            elif selected_tab == 3:
+                self.refresh_budget()
+            elif selected_tab == 4:
+                self.refresh_report()
+            elif selected_tab == 6:
+                self.refresh_settings()
+            
+            self.after(10, self.hide_tab_loader)
+
+        self.after(50, process_refresh)
 
     def _build_dashboard(self, parent):
         top = tk.Frame(parent, bg=BG_MAIN)
@@ -572,9 +710,9 @@ class ExpenseApp(tk.Tk):
         saving = income - expense
 
         self.dash_month_lbl.config(text=month_label(today.year, today.month))
-        self.card_income.set_value(fmt_money(income))
-        self.card_expense.set_value(fmt_money(expense))
-        self.card_saving.set_value(fmt_money(saving))
+        self.card_income.set_value(income)
+        self.card_expense.set_value(expense)
+        self.card_saving.set_value(saving)
         self.card_saving.value_lbl.config(fg=GREEN if saving >= 0 else RED)
 
         cat_totals = defaultdict(float)
@@ -599,7 +737,7 @@ class ExpenseApp(tk.Tk):
             w.destroy()
 
         if not HAS_MPL:
-            tk.Label(self.dash_chart_holder, text="برای نمایش نمودار: pip install matplotlib",
+            tk.Label(self.dash_chart_holder, text="برای نمایش نمودار نیاز به پکیج پایتون است.",
                       bg=BG_CARD, fg=FG_MUTED, font=(FONT_FAMILY, 10)).pack(expand=True)
             return
         if not cat_totals:
@@ -628,9 +766,8 @@ class ExpenseApp(tk.Tk):
             startangle=90, wedgeprops={"linewidth": 1, "edgecolor": BG_CARD},
         )
         
-        # تنظیم فونت برای برچسب‌های درصد
         if HAS_MPL:
-            font_prop = fm.FontProperties(family=PERSIAN_FONT)
+            font_prop = fm.FontProperties(family=[PERSIAN_FONT, 'DejaVu Sans', 'sans-serif'])
             for autotext in autotexts:
                 autotext.set_fontproperties(font_prop)
         
@@ -665,31 +802,31 @@ class ExpenseApp(tk.Tk):
 
         self.amount_var = tk.StringVar()
         row("مبلغ (تومان)", lambda: ttk.Entry(
-            grid, textvariable=self.amount_var, font=(FONT_FAMILY, 11)), 0)
+            grid, textvariable=self.amount_var, font=(FONT_FAMILY, 11), justify="right"), 0)
 
         self.category_var = tk.StringVar()
         self.category_combo = row("دسته‌بندی", lambda: ttk.Combobox(
             grid, textvariable=self.category_var, state="readonly",
-            values=EXPENSE_CATEGORIES, font=(FONT_FAMILY, 11)), 1)
+            values=EXPENSE_CATEGORIES, font=(FONT_FAMILY, 11), justify="right"), 1)
 
         self.note_var = tk.StringVar()
         row("توضیحات (اختیاری)", lambda: ttk.Entry(
-            grid, textvariable=self.note_var, font=(FONT_FAMILY, 11)), 2)
+            grid, textvariable=self.note_var, font=(FONT_FAMILY, 11), justify="right"), 2)
 
         self.date_var = tk.StringVar(value=jalali_str(jtoday()))
         row("تاریخ شمسی (YYYY-MM-DD)", lambda: ttk.Entry(
-            grid, textvariable=self.date_var, font=(FONT_FAMILY, 11)), 3)
+            grid, textvariable=self.date_var, font=(FONT_FAMILY, 11), justify="right"), 3)
         tk.Label(grid, text="مثال: 1405-03-11", bg=BG_CARD, fg=FG_MUTED,
-                  font=(FONT_FAMILY, 9)).grid(row=4, column=0, sticky="w", padx=10)
+                  font=(FONT_FAMILY, 9)).grid(row=4, column=0, sticky="e", padx=10)
 
         self._refresh_category_list()
 
         btn_frame = tk.Frame(wrap, bg=BG_CARD)
         btn_frame.pack(fill="x", padx=20, pady=(10, 24))
-        ttk.Button(btn_frame, text="ثبت تراکنش", command=self._submit_transaction).pack(side="right")
-        ttk.Button(btn_frame, text="امروز", command=self._set_today).pack(side="right", padx=8)
-        self.add_status_lbl = tk.Label(btn_frame, text="", bg=BG_CARD, fg=GREEN,
-                                        font=(FONT_FAMILY, 10))
+        ModernButton(btn_frame, text="ثبت تراکنش", command=self._submit_transaction).pack(side="right")
+        ModernButton(btn_frame, text="امروز", bg_color=BG_CARD_ALT, hover_color="#2c3566",
+                     command=self._set_today).pack(side="right", padx=8)
+        self.add_status_lbl = tk.Label(btn_frame, text="", bg=BG_CARD, fg=GREEN, font=(FONT_FAMILY, 10))
         self.add_status_lbl.pack(side="right", padx=14)
 
     def _set_today(self):
@@ -710,7 +847,7 @@ class ExpenseApp(tk.Tk):
             messagebox.showerror("خطا", "مبلغ را به‌صورت یک عدد مثبت وارد کنید.")
             return None
         if not HAS_JDATETIME:
-            messagebox.showerror("خطا", "کتابخانه jdatetime نصب نیست:\npip install jdatetime")
+            messagebox.showerror("خطا", "کتابخانه مربوط به تاریخ نصب نیست.")
             return None
         try:
             jd = parse_jalali(date_raw)
@@ -742,16 +879,16 @@ class ExpenseApp(tk.Tk):
 
         tk.Label(filt, text="فیلتر بر اساس ماه:", bg=BG_MAIN, fg=FG_MUTED,
                   font=(FONT_FAMILY, 10)).pack(side="right", padx=6)
-        self.hist_year_cb = ttk.Combobox(filt, state="readonly", width=8, font=(FONT_FAMILY, 10))
+        self.hist_year_cb = ttk.Combobox(filt, state="readonly", width=8, font=(FONT_FAMILY, 10), justify="right")
         self.hist_year_cb.pack(side="right", padx=4)
         self.hist_month_cb = ttk.Combobox(filt, state="readonly", width=10, font=(FONT_FAMILY, 10),
-                                           values=JALALI_MONTH_NAMES)
+                                           values=JALALI_MONTH_NAMES, justify="right")
         self.hist_month_cb.pack(side="right", padx=4)
-        ttk.Button(filt, text="اعمال فیلتر", command=self.refresh_history).pack(side="right", padx=8)
-        ttk.Button(filt, text="نمایش همه", command=lambda: self.refresh_history(show_all=True)).pack(
-            side="right", padx=4)
-        ttk.Button(filt, text="📥 خروجی اکسل", command=self._export_history_excel).pack(
-            side="left", padx=4)
+        ModernButton(filt, text="اعمال فیلتر", command=self.refresh_history).pack(side="right", padx=8)
+        ModernButton(filt, text="نمایش همه", bg_color=BG_CARD_ALT, hover_color="#2c3566",
+                     command=lambda: self.refresh_history(show_all=True)).pack(side="right", padx=4)
+        ModernButton(filt, text="📥 خروجی اکسل", bg_color=GREEN, hover_color="#33c084", fg_color="#08120c",
+                     command=self._export_history_excel).pack(side="left", padx=4)
 
         cols = ("date", "kind", "category", "amount", "note", "id")
         self.tree = ttk.Treeview(parent, columns=cols, show="headings", selectmode="browse")
@@ -771,12 +908,11 @@ class ExpenseApp(tk.Tk):
 
         bottom = tk.Frame(parent, bg=BG_MAIN)
         bottom.pack(fill="x", pady=6)
-        ttk.Button(bottom, text="حذف تراکنش", style="Danger.TButton",
-                   command=self._delete_selected).pack(side="right")
-        ttk.Button(bottom, text="✏️ ویرایش تراکنش", command=self._edit_selected).pack(
-            side="right", padx=8)
-        self.hist_summary_lbl = tk.Label(bottom, text="", bg=BG_MAIN, fg=FG_MUTED,
-                                          font=(FONT_FAMILY, 10))
+        ModernButton(bottom, text="حذف تراکنش", bg_color=RED, hover_color="#e05555",
+                     command=self._delete_selected).pack(side="right")
+        ModernButton(bottom, text="✏️ ویرایش تراکنش", bg_color=ACCENT2, hover_color="#3bb2a7", fg_color="#08120c",
+                     command=self._edit_selected).pack(side="right", padx=8)
+        self.hist_summary_lbl = tk.Label(bottom, text="", bg=BG_MAIN, fg=FG_MUTED, font=(FONT_FAMILY, 10))
         self.hist_summary_lbl.pack(side="left")
 
         self._current_history_rows = []
@@ -857,6 +993,14 @@ class ExpenseApp(tk.Tk):
         dlg.transient(self)
         dlg.grab_set()
 
+        dlg.attributes("-alpha", 0.0)
+        def fade_in(alpha=0.0):
+            if alpha < 1.0:
+                alpha += 0.1
+                dlg.attributes("-alpha", alpha)
+                self.after(15, lambda: fade_in(alpha))
+        fade_in()
+
         kind_var = tk.StringVar(value=kind)
         amount_var = tk.StringVar(value=fmt_money(amount))
         note_var = tk.StringVar(value=note or "")
@@ -884,19 +1028,19 @@ class ExpenseApp(tk.Tk):
         grid.grid_columnconfigure(0, weight=1)
 
         tk.Label(grid, text="مبلغ", bg=BG_CARD, fg=FG_TEXT).grid(row=0, column=1, sticky="e", pady=8)
-        ttk.Entry(grid, textvariable=amount_var).grid(row=0, column=0, sticky="ew", pady=8, padx=8)
+        ttk.Entry(grid, textvariable=amount_var, justify="right").grid(row=0, column=0, sticky="ew", pady=8, padx=8)
 
         tk.Label(grid, text="دسته‌بندی", bg=BG_CARD, fg=FG_TEXT).grid(row=1, column=1, sticky="e", pady=8)
         cat_combo = ttk.Combobox(grid, textvariable=category_var, state="readonly",
-                                  values=cats_for_kind())
+                                  values=cats_for_kind(), justify="right")
         cat_combo.grid(row=1, column=0, sticky="ew", pady=8, padx=8)
 
         tk.Label(grid, text="توضیحات", bg=BG_CARD, fg=FG_TEXT).grid(row=2, column=1, sticky="e", pady=8)
-        ttk.Entry(grid, textvariable=note_var).grid(row=2, column=0, sticky="ew", pady=8, padx=8)
+        ttk.Entry(grid, textvariable=note_var, justify="right").grid(row=2, column=0, sticky="ew", pady=8, padx=8)
 
         tk.Label(grid, text="تاریخ (YYYY-MM-DD)", bg=BG_CARD, fg=FG_TEXT).grid(
             row=3, column=1, sticky="e", pady=8)
-        ttk.Entry(grid, textvariable=date_var).grid(row=3, column=0, sticky="ew", pady=8, padx=8)
+        ttk.Entry(grid, textvariable=date_var, justify="right").grid(row=3, column=0, sticky="ew", pady=8, padx=8)
 
         def save():
             result = self._validate_transaction_form(
@@ -911,8 +1055,9 @@ class ExpenseApp(tk.Tk):
 
         btns = tk.Frame(dlg, bg=BG_CARD)
         btns.pack(fill="x", padx=20, pady=20)
-        ttk.Button(btns, text="ذخیره تغییرات", command=save).pack(side="right")
-        ttk.Button(btns, text="انصراف", command=dlg.destroy).pack(side="right", padx=8)
+        ModernButton(btns, text="ذخیره تغییرات", command=save).pack(side="right")
+        ModernButton(btns, text="انصراف", bg_color=BG_CARD_ALT, hover_color="#2c3566",
+                     command=dlg.destroy).pack(side="right", padx=8)
 
     def _export_history_excel(self):
         rows = self._current_history_rows
@@ -947,10 +1092,8 @@ class ExpenseApp(tk.Tk):
 
         btn_frame = tk.Frame(card, bg=BG_CARD)
         btn_frame.pack(fill="x", padx=16, pady=16)
-        ttk.Button(btn_frame, text="ذخیره‌ی همه‌ی بودجه‌ها", command=self._save_budgets).pack(
-            side="right")
-        self.budget_status_lbl = tk.Label(btn_frame, text="", bg=BG_CARD, fg=GREEN,
-                                           font=(FONT_FAMILY, 10))
+        ModernButton(btn_frame, text="ذخیره‌ی همه‌ی بودجه‌ها", command=self._save_budgets).pack(side="right")
+        self.budget_status_lbl = tk.Label(btn_frame, text="", bg=BG_CARD, fg=GREEN, font=(FONT_FAMILY, 10))
         self.budget_status_lbl.pack(side="right", padx=14)
 
     def _save_budgets(self):
@@ -980,16 +1123,28 @@ class ExpenseApp(tk.Tk):
         top.pack(fill="x", pady=(10, 10))
         tk.Label(top, text="سال شمسی:", bg=BG_MAIN, fg=FG_MUTED,
                   font=(FONT_FAMILY, 10)).pack(side="right", padx=6)
-        self.report_year_cb = ttk.Combobox(top, state="readonly", width=8, font=(FONT_FAMILY, 10))
+        self.report_year_cb = ttk.Combobox(top, state="readonly", width=8, font=(FONT_FAMILY, 10), justify="right")
         self.report_year_cb.pack(side="right")
-        ttk.Button(top, text="بروزرسانی نمودار", command=self.refresh_report).pack(side="right", padx=10)
-        ttk.Button(top, text="📥 خروجی اکسل", command=self._export_report_excel).pack(
-            side="left", padx=4)
-        ttk.Button(top, text="📄 خروجی PDF", command=self._export_report_pdf).pack(
-            side="left", padx=4)
+        ModernButton(top, text="بروزرسانی نمودار", command=self.refresh_report).pack(side="right", padx=10)
+        ModernButton(top, text="🤖 تحلیل هوشمند مشاور", bg_color=ACCENT, hover_color=ACCENT_HOVER,
+                     command=self._analyze_report_with_ai).pack(side="right", padx=4)
+        
+        ModernButton(top, text="📥 خروجی اکسل", bg_color=GREEN, hover_color="#33c084", fg_color="#08120c",
+                     command=self._export_report_excel).pack(side="left", padx=4)
+        ModernButton(top, text="📄 خروجی پی‌دی‌اف", bg_color=ACCENT2, hover_color="#3bb2a7", fg_color="#08120c",
+                     command=self._export_report_pdf).pack(side="left", padx=4)
 
         self.report_chart_holder = tk.Frame(parent, bg=BG_CARD)
         self.report_chart_holder.pack(fill="both", expand=True, pady=10)
+
+        ai_box = tk.Frame(parent, bg=BG_CARD_ALT)
+        ai_box.pack(fill="x", pady=(0, 10))
+        tk.Label(ai_box, text="💡 نظر مشاور هوش مصنوعی:", bg=BG_CARD_ALT, fg=ACCENT2,
+                 font=(FONT_FAMILY, 10, "bold")).pack(anchor="e", padx=12, pady=(8, 2))
+        
+        self.ai_report_lbl = tk.Label(ai_box, text="روی دکمه تحلیل هوشمند مشاور کلیک کنید تا تحلیل وضعیت مالی شما آماده شود.",
+                                      bg=BG_CARD_ALT, fg=FG_TEXT, font=(FONT_FAMILY, 9), wraplength=1050, justify="right", anchor="e")
+        self.ai_report_lbl.pack(fill="x", padx=12, pady=(0, 8))
 
     def _compute_year_data(self, year):
         incomes, expenses, savings = [], [], []
@@ -1012,75 +1167,193 @@ class ExpenseApp(tk.Tk):
         except ValueError:
             year = jtoday().year
 
-        for w in self.report_chart_holder.winfo_children():
-            w.destroy()
-
         if not HAS_MPL:
-            tk.Label(self.report_chart_holder, text="برای نمایش نمودار: pip install matplotlib",
+            for w in self.report_chart_holder.winfo_children():
+                w.destroy()
+            tk.Label(self.report_chart_holder, text="برای نمایش نمودار نیاز به پکیج پایتون است.",
                       bg=BG_CARD, fg=FG_MUTED, font=(FONT_FAMILY, 10)).pack(expand=True)
             return
 
         incomes, expenses, savings = self._compute_year_data(year)
-        fig = self._make_year_bar_figure(year, incomes, expenses, savings)
+
+        fig = Figure(figsize=(9, 4.2), dpi=100)
+        fig.patch.set_facecolor(BG_CARD)
+        ax = fig.add_subplot(111)
+        ax.set_facecolor(BG_CARD)
+
+        for w in self.report_chart_holder.winfo_children():
+            w.destroy()
+
         canvas = FigureCanvasTkAgg(fig, master=self.report_chart_holder)
-        canvas.draw()
         canvas.get_tk_widget().pack(fill="both", expand=True)
 
         total_income, total_expense = sum(incomes), sum(expenses)
-        tk.Label(
+        info_lbl = tk.Label(
             self.report_chart_holder,
             text=(f"جمع کل سال {year}   —   درآمد: {fmt_money(total_income)}   |   "
                   f"هزینه: {fmt_money(total_expense)}   |   "
                   f"پس‌انداز خالص: {fmt_money(total_income - total_expense)}"),
             bg=BG_CARD, fg=FG_TEXT, font=(FONT_FAMILY, 11, "bold"),
-        ).pack(pady=(0, 12))
+        )
+        info_lbl.pack(pady=(0, 12))
 
-    def _make_year_bar_figure(self, year, incomes, expenses, savings):
-        fig = Figure(figsize=(9, 4.2), dpi=100)
-        fig.patch.set_facecolor(BG_CARD)
-        ax = fig.add_subplot(111)
-        ax.set_facecolor(BG_CARD)
-        x = range(12)
-        width = 0.27
-        
-        # استفاده از فونت فارسی برای برچسب‌ها
-        if HAS_MPL:
-            font_prop = fm.FontProperties(family=PERSIAN_FONT)
-        
-        ax.bar([i - width for i in x], incomes, width=width, label="درآمد", color=GREEN)
-        ax.bar(list(x), expenses, width=width, label="هزینه", color=RED)
-        ax.bar([i + width for i in x], savings, width=width, label="پس‌انداز", color=BLUE)
-        ax.set_xticks(list(x))
-        
-        # استفاده از نام کامل ماه‌ها به جای نام‌های کوتاه
-        if HAS_MPL:
+        def animate_bars(step=1, max_steps=12):
+            ax.clear()
+            factor = step / max_steps
+            inc_scaled = [v * factor for v in incomes]
+            exp_scaled = [v * factor for v in expenses]
+            sav_scaled = [v * factor for v in savings]
+
+            x = range(12)
+            width = 0.27
+            font_prop = fm.FontProperties(family=[PERSIAN_FONT, 'DejaVu Sans', 'sans-serif'])
+
+            ax.bar([i - width for i in x], inc_scaled, width=width, label="درآمد", color=GREEN)
+            ax.bar(list(x), exp_scaled, width=width, label="هزینه", color=RED)
+            ax.bar([i + width for i in x], sav_scaled, width=width, label="پس‌انداز", color=BLUE)
+            ax.set_xticks(list(x))
+            
             ax.set_xticklabels(JALALI_MONTH_NAMES, color=FG_TEXT, fontsize=9, fontproperties=font_prop)
-        else:
-            ax.set_xticklabels(JALALI_MONTH_NAMES, color=FG_TEXT, fontsize=9)
-        
-        ax.tick_params(colors=FG_TEXT)
-        
-        # تنظیم فرمت اعداد برای محور y
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
-        
-        for spine in ax.spines.values():
-            spine.set_color(BG_CARD_ALT)
-        ax.axhline(0, color=BG_CARD_ALT, linewidth=1)
-        
-        # تنظیم فونت برای افسانه و عنوان
-        if HAS_MPL:
+            ax.tick_params(colors=FG_TEXT)
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda val, p: format(int(val), ',')))
+            
+            for spine in ax.spines.values():
+                spine.set_color(BG_CARD_ALT)
+            ax.axhline(0, color=BG_CARD_ALT, linewidth=1)
+            
             ax.legend(facecolor=BG_CARD, edgecolor=BG_CARD, labelcolor=FG_TEXT, prop=font_prop)
             ax.set_title(f"گزارش سالانه {year} (تقویم شمسی)", color=FG_TEXT, fontsize=12, fontproperties=font_prop)
-        else:
-            ax.legend(facecolor=BG_CARD, edgecolor=BG_CARD, labelcolor=FG_TEXT)
-            ax.set_title(f"گزارش سالانه {year} (تقویم شمسی)", color=FG_TEXT, fontsize=12)
+            
+            fig.tight_layout()
+            canvas.draw_idle()
+
+            if step < max_steps:
+                self.after(25, lambda: animate_bars(step + 1, max_steps))
+
+        animate_bars()
+
+    def _analyze_report_with_ai(self):
+        if not HAS_OPENAI or not self.ai_client:
+            messagebox.showerror("خطا", "سرویس هوش مصنوعی در دسترس نیست.")
+            return
+
+        try:
+            year = int(self.report_year_cb.get())
+        except ValueError:
+            year = jtoday().year
+
+        incomes, expenses, savings = self._compute_year_data(year)
+        total_inc, total_exp = sum(incomes), sum(expenses)
+
+        if total_inc == 0 and total_exp == 0:
+            self.ai_report_lbl.config(
+                text=f"اطلاعات مالی برای سال {year} ثبت نشده است. لطفاً ابتدا تراکنش‌های خود را در بخش ثبت تراکنش وارد کنید."
+            )
+            return
+
+        month_details = [
+            f"{JALALI_MONTH_NAMES[i]}: درآمد={incomes[i]}, هزینه={expenses[i]}, پس‌انداز={savings[i]}"
+            for i in range(12)
+        ]
+
+        summary_text = "\n".join(month_details)
+        prompt = (
+            f"اطلاعات مالی سال {year} کاربر به شرح زیر است:\n{summary_text}\n"
+            "لطفا وضعیت مالی او را به زبان فارسی بسیار صمیمی و کاربردی تحلیل کن. "
+            "مشخص کن در چه ماه‌هایی کم پس‌انداز کرده یا هزینه‌اش بالا بوده و یک راهکار کوتاه برای بهبود پس‌اندازش ارائه بده. "
+            "اصلا از ستاره یا علامت های پررنگ کننده استفاده نکن."
+        )
+
+        self.ai_report_lbl.config(text="⏳ در حال تحلیل داده‌های مالی توسط هوش مصنوعی...")
+
+        def fetch_ai():
+            try:
+                response = self.ai_client.chat.completions.create(
+                    model=GAPGPT_MODEL,
+                    messages=[
+                        {"role": "system", "content": FINANCIAL_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                text = clean_ai_formatting(response.choices[0].message.content)
+                self.after(0, lambda: self.ai_report_lbl.config(text=text))
+            except Exception as e:
+                self.after(0, lambda: self.ai_report_lbl.config(text=f"خطا در ارتباط با هوش مصنوعی: {e}"))
+
+        threading.Thread(target=fetch_ai, daemon=True).start()
+
+    def _build_ai_chat(self, parent):
+        top = tk.Frame(parent, bg=BG_MAIN)
+        top.pack(fill="x", pady=(10, 5))
+        tk.Label(top, text="🤖 مشاور اختصاصی مالی و بودجه‌بندی", bg=BG_MAIN, fg=FG_TEXT,
+                 font=(FONT_FAMILY, 12, "bold")).pack(side="right")
+
+        chat_card = tk.Frame(parent, bg=BG_CARD)
+        chat_card.pack(fill="both", expand=True, pady=5)
+
+        self.chat_display = tk.Text(chat_card, bg=BG_CARD_ALT, fg=FG_TEXT, font=(FONT_FAMILY, 10),
+                                    wrap="word", bd=0, padx=12, pady=10)
+        self.chat_display.pack(fill="both", expand=True, padx=10, pady=10)
         
-        fig.tight_layout()
-        return fig
+        self.chat_display.tag_configure("rtl_right", justify="right")
+        self.chat_display.config(state="disabled")
+
+        input_frame = tk.Frame(parent, bg=BG_MAIN)
+        input_frame.pack(fill="x", pady=(5, 10))
+
+        self.chat_input = ttk.Entry(input_frame, font=(FONT_FAMILY, 10), justify="right")
+        self.chat_input.pack(side="right", fill="x", expand=True, padx=(5, 0))
+        self.chat_input.bind("<Return>", lambda e: self._send_ai_chat())
+
+        ModernButton(input_frame, text="ارسال 🚀", command=self._send_ai_chat).pack(side="left")
+
+        self.chat_history_messages = [
+            {"role": "system", "content": FINANCIAL_SYSTEM_PROMPT}
+        ]
+        
+        self._append_chat("مشاور", "سلام! من مشاور مالی شما هستم. چطور می‌تونم در زمینه مدیریت هزینه‌ها، بودجه‌بندی و پس‌انداز بهتون کمک کنم؟")
+
+    def _append_chat(self, sender, text):
+        clean_text = clean_ai_formatting(text)
+        self.chat_display.config(state="normal")
+        
+        self.chat_display.insert("end", f"{sender}:\n", ("rtl_right",))
+        self.chat_display.insert("end", f"{clean_text}\n\n", ("rtl_right",))
+        
+        self.chat_display.see("end")
+        self.chat_display.config(state="disabled")
+
+    def _send_ai_chat(self):
+        user_msg = self.chat_input.get().strip()
+        if not user_msg:
+            return
+
+        if not HAS_OPENAI or not self.ai_client:
+            messagebox.showerror("خطا", "سرویس هوش مصنوعی در دسترس نیست.")
+            return
+
+        self._append_chat("شما", user_msg)
+        self.chat_input.delete(0, "end")
+
+        self.chat_history_messages.append({"role": "user", "content": user_msg})
+
+        def chat_thread():
+            try:
+                response = self.ai_client.chat.completions.create(
+                    model=GAPGPT_MODEL,
+                    messages=self.chat_history_messages
+                )
+                ai_msg = clean_ai_formatting(response.choices[0].message.content)
+                self.chat_history_messages.append({"role": "assistant", "content": ai_msg})
+                self.after(0, lambda: self._append_chat("مشاور", ai_msg))
+            except Exception as e:
+                self.after(0, lambda: self._append_chat("مشاور", f"خطا در دریافت پاسخ: {e}"))
+
+        threading.Thread(target=chat_thread, daemon=True).start()
 
     def _export_transactions_excel(self, rows, default_name):
         if not HAS_OPENPYXL:
-            messagebox.showerror("خطا", "کتابخانه openpyxl نصب نیست:\npip install openpyxl")
+            messagebox.showerror("خطا", "کتابخانه اکسل نصب نیست.")
             return
         path = filedialog.asksaveasfilename(
             defaultextension=".xlsx", initialfile=f"{default_name}.xlsx",
@@ -1117,7 +1390,7 @@ class ExpenseApp(tk.Tk):
 
     def _export_report_excel(self):
         if not HAS_OPENPYXL:
-            messagebox.showerror("خطا", "کتابخانه openpyxl نصب نیست:\npip install openpyxl")
+            messagebox.showerror("خطا", "کتابخانه اکسل نصب نیست.")
             return
         try:
             year = int(self.report_year_cb.get())
@@ -1170,7 +1443,7 @@ class ExpenseApp(tk.Tk):
 
     def _export_report_pdf(self):
         if not HAS_REPORTLAB:
-            messagebox.showerror("خطا", "کتابخانه reportlab نصب نیست:\npip install reportlab")
+            messagebox.showerror("خطا", "کتابخانه پی‌دی‌اف‌ساز نصب نیست.")
             return
         try:
             year = int(self.report_year_cb.get())
@@ -1184,12 +1457,6 @@ class ExpenseApp(tk.Tk):
             return
 
         font_name = register_persian_font()
-        if font_name == "Helvetica":
-            messagebox.showwarning(
-                "فونت فارسی یافت نشد",
-                "فونت فارسی مناسبی پیدا نشد و ممکن است متن فارسی در PDF درست نمایش داده "
-                "نشود.\nبرای رفع این مشکل، فونت Vazirmatn-Regular.ttf را دانلود و کنار "
-                "فایل expense_manager.py قرار دهید.")
 
         incomes, expenses, savings = self._compute_year_data(year)
 
@@ -1211,7 +1478,28 @@ class ExpenseApp(tk.Tk):
         story.append(Spacer(1, 10))
 
         if HAS_MPL:
-            fig = self._make_year_bar_figure(year, incomes, expenses, savings)
+            fig = Figure(figsize=(9, 4.2), dpi=100)
+            fig.patch.set_facecolor(BG_CARD)
+            ax = fig.add_subplot(111)
+            ax.set_facecolor(BG_CARD)
+            x = range(12)
+            width = 0.27
+            font_prop = fm.FontProperties(family=[PERSIAN_FONT, 'DejaVu Sans', 'sans-serif'])
+
+            ax.bar([i - width for i in x], incomes, width=width, label="درآمد", color=GREEN)
+            ax.bar(list(x), expenses, width=width, label="هزینه", color=RED)
+            ax.bar([i + width for i in x], savings, width=width, label="پس‌انداز", color=BLUE)
+            ax.set_xticks(list(x))
+            ax.set_xticklabels(JALALI_MONTH_NAMES, color=FG_TEXT, fontsize=9, fontproperties=font_prop)
+            ax.tick_params(colors=FG_TEXT)
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda val, p: format(int(val), ',')))
+            for spine in ax.spines.values():
+                spine.set_color(BG_CARD_ALT)
+            ax.axhline(0, color=BG_CARD_ALT, linewidth=1)
+            ax.legend(facecolor=BG_CARD, edgecolor=BG_CARD, labelcolor=FG_TEXT, prop=font_prop)
+            ax.set_title(f"گزارش سالانه {year} (تقویم شمسی)", color=FG_TEXT, fontsize=12, fontproperties=font_prop)
+            fig.tight_layout()
+
             buf = BytesIO()
             fig.savefig(buf, format="png", dpi=140, facecolor=fig.get_facecolor())
             buf.seek(0)
@@ -1244,9 +1532,9 @@ class ExpenseApp(tk.Tk):
 
         try:
             doc.build(story)
-            messagebox.showinfo("موفق", f"فایل PDF ذخیره شد:\n{path}")
+            messagebox.showinfo("موفق", f"فایل پی‌دی‌اف ذخیره شد:\n{path}")
         except Exception as e:
-            messagebox.showerror("خطا", f"ساخت PDF ناموفق بود:\n{e}")
+            messagebox.showerror("خطا", f"ساخت پی‌دی‌اف ناموفق بود:\n{e}")
 
     def _build_settings(self, parent):
         info = tk.Frame(parent, bg=BG_CARD)
@@ -1261,12 +1549,12 @@ class ExpenseApp(tk.Tk):
 
         btns = tk.Frame(parent, bg=BG_MAIN)
         btns.pack(fill="x", pady=(0, 10))
-        ttk.Button(btns, text="📦 پشتیبان‌گیری دستی الان", style="Success.TButton",
-                   command=self._manual_backup).pack(side="right")
-        ttk.Button(btns, text="♻️ بازیابی از پشتیبان انتخاب‌شده", style="Danger.TButton",
-                   command=self._restore_backup).pack(side="right", padx=8)
-        ttk.Button(btns, text="بروزرسانی لیست", command=self.refresh_settings).pack(
-            side="left")
+        ModernButton(btns, text="📦 پشتیبان‌گیری دستی الان", bg_color=GREEN, hover_color="#33c084", fg_color="#08120c",
+                     command=self._manual_backup).pack(side="right")
+        ModernButton(btns, text="♻️ بازیابی از پشتیبان انتخاب‌شده", bg_color=RED, hover_color="#e05555",
+                     command=self._restore_backup).pack(side="right", padx=8)
+        ModernButton(btns, text="بروزرسانی لیست", bg_color=BG_CARD_ALT, hover_color="#2c3566",
+                     command=self.refresh_settings).pack(side="left")
 
         cols = ("file", "size")
         self.backup_tree = ttk.Treeview(parent, columns=cols, show="headings",
@@ -1321,7 +1609,6 @@ class ExpenseApp(tk.Tk):
         self.refresh_budget()
         self.refresh_report()
         self.refresh_settings()
-
 
 if __name__ == "__main__":
     app = ExpenseApp()
