@@ -34,7 +34,7 @@
 
 ```bash
 pip install -r requirements.txt
-python3 expense_manager.py
+python3 finance.py
 ```
 
 ## کتابخانه‌های استفاده‌شده
@@ -82,7 +82,7 @@ python3 expense_manager.py
 
 | فایل/پوشه | توضیح |
 |---|---|
-| `expense_manager.py` | کد اصلی برنامه |
+| `finance.py` | کد اصلی برنامه |
 | `requirements.txt` | لیست کتابخانه‌های موردنیاز |
 | `expenses.db` | پایگاه‌داده‌ی SQLite (خودکار ساخته می‌شود) |
 | `backups/` | نسخه‌های پشتیبان از پایگاه‌داده |
