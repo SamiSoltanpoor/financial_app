@@ -34,7 +34,7 @@
 
 ```bash
 pip install -r requirements.txt
-python3 expense_manager.py
+python3 finance.py
 ```
 
 ## کتابخانه‌های استفاده‌شده
