@@ -16,10 +16,51 @@ except ImportError:
     HAS_JDATETIME = False
 
 try:
+    import matplotlib
+    matplotlib.use('TkAgg')
+    import matplotlib.pyplot as plt
     from matplotlib.figure import Figure
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    import matplotlib
+    import matplotlib.font_manager as fm
+    
+    # تنظیم فونت فارسی برای matplotlib
+    def setup_persian_font_for_matplotlib():
+        """تنظیم فونت فارسی برای matplotlib"""
+        # لیست فونت‌های فارسی که هم فارسی و هم لاتین را پشتیبانی می‌کنند
+        # Vazirmatn و IRANSans بهترین گزینه‌ها هستند
+        persian_fonts = [
+            'Vazirmatn', 'IRANSans', 'Vazir', 'Shabnam', 'Sahel',
+            'B Nazanin', 'B Mitra', 'B Yekan', 'Tahoma', 'Arial'
+        ]
+        
+        # پیدا کردن فونت‌های نصب شده
+        available_fonts = [f.name for f in fm.fontManager.ttflist]
+        
+        # اولویت با Vazirmatn است چون هم فارسی و هم لاتین را خوب پشتیبانی می‌کند
+        preferred_fonts = ['Vazirmatn', 'IRANSans', 'Vazir', 'Shabnam', 'Sahel']
+        
+        for font in preferred_fonts:
+            if font in available_fonts:
+                return font
+        
+        # اگر هیچ فونت فارسی پیدا نشد، از فونت پیش‌فرض استفاده کن
+        return 'DejaVu Sans'
+    
+    PERSIAN_FONT = setup_persian_font_for_matplotlib()
+    
+    # تنظیم فونت برای matplotlib
+    matplotlib.rcParams['font.family'] = PERSIAN_FONT
     matplotlib.rcParams['axes.unicode_minus'] = False
+    matplotlib.rcParams['font.size'] = 10
+    
+    # برای اطمینان از اینکه فونت به درستی تنظیم شده
+    if PERSIAN_FONT != 'DejaVu Sans':
+        # پیدا کردن مسیر فونت و تنظیم آن
+        for f in fm.fontManager.ttflist:
+            if f.name == PERSIAN_FONT:
+                matplotlib.rcParams['font.family'] = [PERSIAN_FONT, 'DejaVu Sans', 'sans-serif']
+                break
+    
     HAS_MPL = True
 except ImportError:
     HAS_MPL = False
@@ -576,14 +617,23 @@ class ExpenseApp(tk.Tk):
         fig.patch.set_facecolor(BG_CARD)
         ax = fig.add_subplot(111)
         ax.set_facecolor(BG_CARD)
-        labels = [rtl(k) for k in cat_totals.keys()]
+        
+        labels = list(cat_totals.keys())
         values = list(cat_totals.values())
         colors = [ACCENT, ACCENT2, GREEN, RED, BLUE, YELLOW, "#ff9f6b", "#c792ea", "#82aaff"]
-        wedges, _texts, _autotexts = ax.pie(
+        
+        wedges, _texts, autotexts = ax.pie(
             values, autopct="%1.0f%%", colors=colors,
             textprops={"color": "#ffffff", "fontsize": 9},
             startangle=90, wedgeprops={"linewidth": 1, "edgecolor": BG_CARD},
         )
+        
+        # تنظیم فونت برای برچسب‌های درصد
+        if HAS_MPL:
+            font_prop = fm.FontProperties(family=PERSIAN_FONT)
+            for autotext in autotexts:
+                autotext.set_fontproperties(font_prop)
+        
         ax.legend(wedges, labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
                    frameon=False, labelcolor=FG_TEXT, fontsize=8)
         fig.tight_layout()
@@ -992,17 +1042,38 @@ class ExpenseApp(tk.Tk):
         ax.set_facecolor(BG_CARD)
         x = range(12)
         width = 0.27
-        ax.bar([i - width for i in x], incomes, width=width, label=rtl("درآمد"), color=GREEN)
-        ax.bar(list(x), expenses, width=width, label=rtl("هزینه"), color=RED)
-        ax.bar([i + width for i in x], savings, width=width, label=rtl("پس‌انداز"), color=BLUE)
+        
+        # استفاده از فونت فارسی برای برچسب‌ها
+        if HAS_MPL:
+            font_prop = fm.FontProperties(family=PERSIAN_FONT)
+        
+        ax.bar([i - width for i in x], incomes, width=width, label="درآمد", color=GREEN)
+        ax.bar(list(x), expenses, width=width, label="هزینه", color=RED)
+        ax.bar([i + width for i in x], savings, width=width, label="پس‌انداز", color=BLUE)
         ax.set_xticks(list(x))
-        ax.set_xticklabels([rtl(m) for m in JALALI_MONTH_SHORT], color=FG_TEXT, fontsize=9)
+        
+        if HAS_MPL:
+            ax.set_xticklabels(JALALI_MONTH_SHORT, color=FG_TEXT, fontsize=9, fontproperties=font_prop)
+        else:
+            ax.set_xticklabels(JALALI_MONTH_SHORT, color=FG_TEXT, fontsize=9)
+        
         ax.tick_params(colors=FG_TEXT)
+        
+        # تنظیم فرمت اعداد برای محور y
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+        
         for spine in ax.spines.values():
             spine.set_color(BG_CARD_ALT)
         ax.axhline(0, color=BG_CARD_ALT, linewidth=1)
-        ax.legend(facecolor=BG_CARD, edgecolor=BG_CARD, labelcolor=FG_TEXT)
-        ax.set_title(rtl(f"گزارش سالانه {year} (تقویم شمسی)"), color=FG_TEXT, fontsize=12)
+        
+        # تنظیم فونت برای افسانه و عنوان
+        if HAS_MPL:
+            ax.legend(facecolor=BG_CARD, edgecolor=BG_CARD, labelcolor=FG_TEXT, prop=font_prop)
+            ax.set_title(f"گزارش سالانه {year} (تقویم شمسی)", color=FG_TEXT, fontsize=12, fontproperties=font_prop)
+        else:
+            ax.legend(facecolor=BG_CARD, edgecolor=BG_CARD, labelcolor=FG_TEXT)
+            ax.set_title(f"گزارش سالانه {year} (تقویم شمسی)", color=FG_TEXT, fontsize=12)
+        
         fig.tight_layout()
         return fig
 
